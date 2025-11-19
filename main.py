@@ -1,16 +1,18 @@
-# This is a sample Python script.
+import pandas as pd
 
-# Press ⌃R to execute it or replace it with your code.
-# Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
+FILE_PATH = "CoursePreferences.xlsx"
 
+all_sheets = pd.read_excel(FILE_PATH, sheet_name=None)
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press ⌘F8 to toggle the breakpoint.
+# Show sheet names
+print("Sheets found:", list(all_sheets.keys()))
 
+courses_df = all_sheets.get("Courses")
+loads_df = all_sheets.get("Loads")
+times_df = all_sheets.get("Times")
+conflicts_df = all_sheets.get("Conflicts")
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+print(courses_df.head())
+print(loads_df.head())
+print(times_df.head())
+print(conflicts_df.head())
