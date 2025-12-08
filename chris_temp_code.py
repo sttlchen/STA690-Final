@@ -214,8 +214,90 @@ m.addConstrs(
 # Update model to integrate new variables
 m.update()
 
+# Optimize the model
+m.optimize()
+
+# Print the result
+status_codes = {
+1: 'LOADED',
+2: 'OPTIMAL',
+3: 'INFEASIBLE',
+4: 'INF_OR_UNBD',
+5: 'UNBOUNDED'
+}
+status = m.status
 
 
+### Section 4: Output Results ###
+
+# Only proceed if an optimal solution is found
+if m.status == gp.GRB.OPTIMAL:
+
+    # 1. Extract Professor to Course Assignments (x_var)
+    prof_course_assignments = []
+    for (i, j), var in x_var.items():
+        if var.X > 0.5: # Use tolerance for binary variable
+            prof_course_assignments.append({
+                'Prof': i,
+                'Course_Number': j,
+            })
+    
+    prof_course_df = pd.DataFrame(prof_course_assignments)
+
+    # Merge with course attributes for detailed view
+    prof_course_output = prof_course_df.merge(
+        courses_attr[['Number', 'Name', 'Credits', 'Grad/Ugrad']], 
+        left_on='Course_Number', 
+        right_on='Number', 
+        how='left'
+    ).drop(columns=['Number'])
+
+    print("\n--- Professor-Course Assignments (x_var) ---")
+    print(prof_course_output.sort_values(by=['Prof', 'Course_Number']))
+    print("-" * 50)
+
+    # 2. Extract Course to Time Slot Assignments (y_var)
+    course_time_assignments = []
+    for (j, k), var in y_var.items():
+        if var.X > 0.5:
+            course_time_assignments.append({
+                'Course_Number': j,
+                'Time_Index': k,
+            })
+    
+    course_time_df = pd.DataFrame(course_time_assignments)
+
+    # Merge with time and course attributes for detailed view
+    course_time_output = course_time_df.merge(
+        times_attr[['index', 'Times', 'Days']],
+        left_on='Time_Index',
+        right_on='index',
+        how='left'
+    ).drop(columns=['index']).merge(
+        courses_attr[['Number', 'Name']],
+        left_on='Course_Number',
+        right_on='Number',
+        how='left'
+    ).drop(columns=['Number'])
+
+    print("\n--- Course-Time Assignments (y_var) ---")
+    print(course_time_output.sort_values(by=['Course_Number', 'Times']))
+    print("-" * 50)
+
+    # 3. Combined Schedule (Prof, Course, Time)
+    combined_schedule = pd.merge(
+        prof_course_output, 
+        course_time_output.drop(columns=['Name']),
+        on='Course_Number', 
+        how='inner'
+    )
+    
+    print("\n--- Final Course Schedule ---")
+    final_cols = ['Prof', 'Name', 'Times', 'Days', 'Credits', 'Grad/Ugrad']
+    print(combined_schedule[final_cols].sort_values(by=['Prof', 'Times']))
+    print("-" * 50)
+
+    print(f"\nOptimal Objective Value (Total Credits Scheduled): {m.ObjVal}")
 
 
 
