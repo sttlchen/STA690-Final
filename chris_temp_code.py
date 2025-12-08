@@ -68,11 +68,7 @@ prof_attr['course_bin'] = prof_attr['course_bin'].astype(int)
 
 # Clean times attr table
 times_attr['Times_Grp'] = times_attr['Times'].factorize()[0]
-times_attr_temp = times_attr.assign(Day=times_attr['Days'].str.split('/')).explode('Day')
-times_attr['Times_Grp_Day'] = pd.factorize(
-    times_attr_temp.groupby(['Times', 'Day']).ngroup()
-    .groupby(times_attr_temp.index).min()
-)[0]
+times_attr['Times_Grp_Day'] = (times_attr.index // 4) * 2 + (times_attr.index % 4 == 3).astype(int)
 
 # Clean courses attr table
 courses_attr.loc[courses_attr['Grad/Ugrad'] == 'Ugrad', 'Credits'] *= 3
@@ -157,7 +153,7 @@ m.addConstrs(
 
 # Constraint 2 ...
 m.addConstrs(
-    (gp.quicksum(x_var[i, j] for j in idx_course) <= a_var[i]
+    (gp.quicksum(x_var[i, j]*b_var[j] for j in idx_course) <= a_var[i]
      for i in idx_prof),
     name= f'prof_max'
 )
