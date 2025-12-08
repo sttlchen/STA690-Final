@@ -5,7 +5,7 @@
 import pandas as pd
 import numpy as np
 
-from gurobipy import GRB, Model
+import gurobipy as gp
 
 
 FILE_PATH = "CoursePreferences.xlsx"
@@ -28,8 +28,8 @@ num_prof = courses_df.shape[1] - courses_df.columns.get_loc('A')
 def _index_to_col(num: int) -> str:
     """Convert idx to abc and excel style loop"""
     label = []
-    while n > 0:
-        n, r = divmod(n - 1, 26)
+    while num > 0:
+        num, r = divmod(num - 1, 26)
         label.append(chr(ord("A") + r))
     return "".join(reversed(label))
 
@@ -63,6 +63,8 @@ courses_df = courses_df.fillna(0).replace('x', 1) # x = yes
 prof_attr = prof_attr.merge(times_df, on='Prof', how='left').rename(columns={'index': 'time_idx', 'Value': 'time_bin'})
 prof_attr = prof_attr.merge(courses_df, on='Prof', how='left').rename(columns={'Number': 'course_idx', 'Value': 'course_bin'})
 prof_attr['course_idx'] = prof_attr['course_idx'].astype(int)
+prof_attr['course_bin'] = prof_attr['course_bin'].astype(str).str.strip().replace('', 0)
+prof_attr['course_bin'] = prof_attr['course_bin'].astype(int)
 
 # Clean times attr table
 times_attr['Times_Grp'] = times_attr['Times'].factorize()[0]
@@ -101,29 +103,38 @@ d_var = prof_attr.set_index(["Prof", "time_idx"])["time_bin"].to_dict()
 ### Set Model
 
 # Create the model
-m = Model('course_sched') 
+m = gp.Model('course_sched') 
 
 # Set parameters
 m.setParam('OutputFlag', True)
 
 ### Decision Vars
 
+# Idx arrays
+idx_prof = np.unique(np.array(prof_attr["Prof"]))         # Set of Professors (i)
+idx_course = np.unique(np.array(prof_attr["course_idx"])) # Set of Courses (j)
+idx_time = np.unique(np.array(prof_attr["time_idx"]))     # Set of Time Slots (k)
+course_groups = courses_attr.groupby('Number_Group')['Number'].apply(list).to_dict()
+idx_group = course_groups.keys()                          # Set of Course Groups (g)
+day_time_groups = times_attr.groupby('Times_Grp_Day')['index'].apply(list).to_dict()
+idx_day_time = day_time_groups.keys()                     # Set of Day-Time Group IDs (t)
+
 # x_{i,j} prof to class
 x_var = {
-(i, j): m.addVar(name=f"x_{i}_{j}", lb=0)
-for i in np.unique(np.array(prof_attr["Prof"])) for j in np.unique(np.array(prof_attr["course_idx"]))
+(i, j): m.addVar(name=f"x_{i}_{j}", vtype=gp.GRB.BINARY)
+for i in idx_prof for j in idx_course
 }
 
 # y_{j,k} class to time
 y_var = {
-(j, k): m.addVar(name=f"y_{j}_{}", lb=0)
-for j in np.unique(np.array(prof_attr["course_idx"])) for k in np.unique(np.array(prof_attr["time_idx"]))
+(j, k): m.addVar(name=f"y_{j}_{k}", vtype=gp.GRB.BINARY)
+for j in idx_course for k in idx_time
 }
 
 # z_{i,k} prof to time
 z_var = {
-(i, k): m.addVar(name=f"z_{i}_{k}", lb=0)
-for i in np.unique(np.array(prof_attr["Prof"])) for k in np.unique(np.array(prof_attr["time_idx"]))
+(i, k): m.addVar(name=f"z_{i}_{k}", vtype=gp.GRB.BINARY)
+for i in idx_prof for k in idx_time
 }
 
 ### Modelling
@@ -131,17 +142,79 @@ for i in np.unique(np.array(prof_attr["Prof"])) for k in np.unique(np.array(prof
 # Update model to integrate new variables
 m.update()
 
+# Objective Func
+m.setObjective(
+    (gp.quicksum(x_var[i, j] * b_var[j] for i in idx_prof for j in idx_course)),
+    gp.GRB.MAXIMIZE
+)
+
 # Constraint 1 ...
+m.addConstrs(
+    (gp.quicksum(x_var[i, j] for i in idx_prof) <= 1
+     for j in idx_course),
+    name= f'one_prof'
+)
+
 # Constraint 2 ...
+m.addConstrs(
+    (gp.quicksum(x_var[i, j] for j in idx_course) <= a_var[i]
+     for i in idx_prof),
+    name= f'prof_max'
+)
+
 # Constraint 3 ...
-# Constraint 1 ...
+m.addConstrs(
+    (x_var[i, j] <= c_var[i,j]
+     for j in idx_course for i in idx_prof),
+    name= f'prop_course'
+)
+
 # Constraint 4 ...
+m.addConstrs(
+    (gp.quicksum(y_var[j, k] for k in idx_time) <= 1
+     for j in idx_course),
+    name= f'one_class'
+)
+
 # Constraint 5 ...
+m.addConstrs(
+    (gp.quicksum(z_var[i, k] for k in idx_time) <= -(-a_var[i]//3)
+     for i in idx_prof),
+    name= f'limit_prof'
+)
+
 # Constraint 6 ...
+m.addConstrs(
+    (z_var[i, k] <= d_var[i,k]
+     for i in idx_prof for k in idx_time),
+    name= f'proper_prof_time'
+)
+
 # Constraint 7 ...
+m.addConstrs(
+    (gp.quicksum(x_var[i, j] + y_var[j, k] - 1 for j in idx_course) <= z_var[i, k]
+     for i in idx_prof for k in idx_time),
+    name= f'link_prof_class'
+)
+
+# Constraint 8 ...
+m.addConstrs(
+    (gp.quicksum(x_var[i, j] for i in idx_prof) == gp.quicksum(y_var[j, k] for k in idx_time)
+     for j in idx_course),
+    name= f'one_to_one'
+)
+
+# Constraint 9 ...
+m.addConstrs(
+    (gp.quicksum(y_var[j, k] for j in course_groups[g] for k in day_time_groups[t]) <= 1
+     for g in idx_group for t in idx_day_time),
+    name= f'group_conflict'
+)
 
 # Update model to integrate new variables
 m.update()
+
+
 
 
 
