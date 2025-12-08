@@ -1,6 +1,7 @@
 ### Initial Setup
 
 import pandas as pd
+import numpy as np
 
 FILE_PATH = "CoursePreferences.xlsx"
 
@@ -47,20 +48,42 @@ prof_attr['max_credit'] = prof_attr['max_credit'] * 3
 
 times_df = times_df[:-2] # Issue with x=no in xlsx
 times_df = times_df.reset_index()
-
-# Create storage for later views on time
-
-times_storage = times_df[['index','Times','Days']]
+times_attr = times_df[['index','Times','Days']] # Create times attr
 times_df = times_df.drop(columns=['Times', 'Days']).melt(id_vars='index', var_name='Prof', value_name='Value')
-times_df = times_df.fillna(1).replace('x', 0)
+times_df = times_df.fillna(1).replace('x', 0) # x = no
 
-# Join in times to the prof attr table
+courses_df = courses_df[:-2] #issue with xlsx
+courses_attr = courses_df[['Number','Name','Grad/Ugrad','Credits','Labs/Discussion Sections','Total Enrollment']] # Create courses attr
+courses_df = courses_df.drop(columns=['Name','Grad/Ugrad','Credits','Labs/Discussion Sections','Total Enrollment']).melt(id_vars='Number', var_name='Prof', value_name='Value')
+courses_df = courses_df.fillna(0).replace('x', 1) # x = yes
 
-prof_attr = prof_attr.merge(times_df, on='Prof', how='left').rename(columns={'index': 'time_slot', 'Value': 'prof_time'})
 
 
-print(prof_attr.head())
-print(loads_df.head())
-print(times_df.head())
+# Join in times, courses to the prof attr table
+
+prof_attr = prof_attr.merge(times_df, on='Prof', how='left').rename(columns={'index': 'time_idx', 'Value': 'time_bin'})
+prof_attr = prof_attr.merge(courses_df, on='Prof', how='left').rename(columns={'Number': 'course_idx', 'Value': 'course_bin'})
+
+# Clean times attr table
+
+times_attr['Times_Grp'] = times_attr['Times'].factorize()[0]
+times_attr_temp = times_attr.assign(Day=times_attr['Days'].str.split('/')).explode('Day')
+times_attr['Times_Grp_Day'] = pd.factorize(
+    times_attr_temp.groupby(['Times', 'Day']).ngroup()
+    .groupby(times_attr_temp.index).min()
+)[0]
+
+# Clean courses attr table
+
+courses_attr.loc[courses_attr['Grad/Ugrad'] == 'Ugrad', 'Credits'] *= 3
+courses_attr['Number'] = courses_attr['Number'].astype(int)
+courses_attr['Number_Group'] = np.where(
+    courses_attr['Number'].isin([521, 523, 532, 581]),
+    8,
+    ((courses_attr['Number'] - 1) // 100)
+)
+
+### Set Decision and Pre-Determined Vars
+
 
 
