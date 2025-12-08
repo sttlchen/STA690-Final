@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 
 import gurobipy as gp
+from utils import df_with_letter_index, print_results
 
 
 FILE_PATH = "CoursePreferences.xlsx"
@@ -23,21 +24,6 @@ times_df = all_sheets.get("Times")
 
 # Get the number of Prof, look at A and then full length
 num_prof = courses_df.shape[1] - courses_df.columns.get_loc('A')
-
-# Function converting integer to abc enum
-def _index_to_col(num: int) -> str:
-    """Convert idx to abc and excel style loop"""
-    label = []
-    while num > 0:
-        num, r = divmod(num - 1, 26)
-        label.append(chr(ord("A") + r))
-    return "".join(reversed(label))
-
-# Using conversion create labels for prof, output df
-def df_with_letter_index(n: int) -> pd.DataFrame:
-    """Create df with col loop"""
-    labels = [_index_to_col(i) for i in range(1, n + 1)]
-    return pd.DataFrame({'Prof': labels})
 
 # Create inital prof data.frame
 prof_attr = df_with_letter_index(num_prof)
@@ -78,6 +64,7 @@ courses_attr['Number_Group'] = np.where(
     8,
     ((courses_attr['Number'] - 1) // 100)
 )
+courses_attr['Labs'] = (courses_attr['Labs/Discussion Sections'] > 0).astype(int)
 
 #################################
 ### Section 3: Vars for Optim ###
@@ -95,6 +82,10 @@ c_var = prof_attr.set_index(["Prof", "course_idx"])["course_bin"].to_dict()
 
 # d_{i,k} prof time elig
 d_var = prof_attr.set_index(["Prof", "time_idx"])["time_bin"].to_dict()
+
+# d_{i,k} prof time elig
+e_var = courses_attr.set_index("Number")["Labs"].to_dict()
+
 
 ### Set Model
 
@@ -133,6 +124,12 @@ z_var = {
 for i in idx_prof for k in idx_time
 }
 
+# l_{j,k} lab to time
+l_var = {
+(i, j, k): m.addVar(name=f"l_{i}_{j}_{k}", vtype=gp.GRB.BINARY)
+for i in idx_prof for j in idx_course for k in idx_time
+}
+
 ### Modelling
 
 # Update model to integrate new variables
@@ -146,7 +143,7 @@ m.setObjective(
 
 # Constraint 1 ...
 m.addConstrs(
-    (gp.quicksum(x_var[i, j] for i in idx_prof) <= 1
+    (gp.quicksum(x_var[i, j] for i in idx_prof) == 1
      for j in idx_course),
     name= f'one_prof'
 )
@@ -167,7 +164,7 @@ m.addConstrs(
 
 # Constraint 4 ...
 m.addConstrs(
-    (gp.quicksum(y_var[j, k] for k in idx_time) <= 1
+    (gp.quicksum(y_var[j, k] for k in idx_time) == 1
      for j in idx_course),
     name= f'one_class'
 )
@@ -188,8 +185,8 @@ m.addConstrs(
 
 # Constraint 7 ...
 m.addConstrs(
-    (gp.quicksum(x_var[i, j] + y_var[j, k] - 1 for j in idx_course) <= z_var[i, k]
-     for i in idx_prof for k in idx_time),
+    (x_var[i, j] + y_var[j, k] - 1 <= z_var[i, k]
+     for i in idx_prof for j in idx_course for k in idx_time),
     name= f'link_prof_class'
 )
 
@@ -202,10 +199,27 @@ m.addConstrs(
 
 # Constraint 9 ...
 m.addConstrs(
-    (gp.quicksum(y_var[j, k] for j in course_groups[g] for k in day_time_groups[t]) <= 1
+    (gp.quicksum(l_var[i, j, k] for i in idx_prof for k in idx_time) == gp.quicksum(y_var[j, k]*e_var[j] for k in idx_time)
+     for j in idx_course),
+    name= f'lab_exists'
+)
+
+# Constraint 10 ...
+m.addConstrs(
+    (((1/3)*(x_var[i, j] + (1 - y_var[j, k]) + d_var[i, k])) >= l_var[i, j, k]
+     for i in idx_prof for j in idx_course for k in idx_time),
+    name= f'prof_lab_time'
+)
+
+# Constraint 11 ...
+m.addConstrs(
+    (gp.quicksum(y_var[j, k] for j in course_groups[g] for k in day_time_groups[t]) 
+     + gp.quicksum(l_var[i, j, k] for i in idx_prof for j in course_groups[g] for k in day_time_groups[t]) <= 1
      for g in idx_group for t in idx_day_time),
     name= f'group_conflict'
 )
+
+
 
 # Update model to integrate new variables
 m.update()
@@ -226,74 +240,7 @@ status = m.status
 
 ### Section 4: Output Results ###
 
-# Only proceed if an optimal solution is found
-if m.status == gp.GRB.OPTIMAL:
-
-    # 1. Extract Professor to Course Assignments (x_var)
-    prof_course_assignments = []
-    for (i, j), var in x_var.items():
-        if var.X > 0.5: # Use tolerance for binary variable
-            prof_course_assignments.append({
-                'Prof': i,
-                'Course_Number': j,
-            })
-    
-    prof_course_df = pd.DataFrame(prof_course_assignments)
-
-    # Merge with course attributes for detailed view
-    prof_course_output = prof_course_df.merge(
-        courses_attr[['Number', 'Name', 'Credits', 'Grad/Ugrad']], 
-        left_on='Course_Number', 
-        right_on='Number', 
-        how='left'
-    ).drop(columns=['Number'])
-
-    print("\n--- Professor-Course Assignments (x_var) ---")
-    print(prof_course_output.sort_values(by=['Prof', 'Course_Number']))
-    print("-" * 50)
-
-    # 2. Extract Course to Time Slot Assignments (y_var)
-    course_time_assignments = []
-    for (j, k), var in y_var.items():
-        if var.X > 0.5:
-            course_time_assignments.append({
-                'Course_Number': j,
-                'Time_Index': k,
-            })
-    
-    course_time_df = pd.DataFrame(course_time_assignments)
-
-    # Merge with time and course attributes for detailed view
-    course_time_output = course_time_df.merge(
-        times_attr[['index', 'Times', 'Days']],
-        left_on='Time_Index',
-        right_on='index',
-        how='left'
-    ).drop(columns=['index']).merge(
-        courses_attr[['Number', 'Name']],
-        left_on='Course_Number',
-        right_on='Number',
-        how='left'
-    ).drop(columns=['Number'])
-
-    print("\n--- Course-Time Assignments (y_var) ---")
-    print(course_time_output.sort_values(by=['Course_Number', 'Times']))
-    print("-" * 50)
-
-    # 3. Combined Schedule (Prof, Course, Time)
-    combined_schedule = pd.merge(
-        prof_course_output, 
-        course_time_output.drop(columns=['Name']),
-        on='Course_Number', 
-        how='inner'
-    )
-    
-    print("\n--- Final Course Schedule ---")
-    final_cols = ['Prof', 'Name', 'Times', 'Days', 'Credits', 'Grad/Ugrad']
-    print(combined_schedule[final_cols].sort_values(by=['Prof', 'Times']))
-    print("-" * 50)
-
-    print(f"\nOptimal Objective Value (Total Credits Scheduled): {m.ObjVal}")
+print_results(m, x_var, y_var, l_var, courses_attr, times_attr)
 
 
 
