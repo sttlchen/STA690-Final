@@ -34,20 +34,30 @@ prof_attr = prof_attr.rename(columns={'NumCourses': 'max_credit'})
 prof_attr['max_credit'] = prof_attr['max_credit'] * 3
 
 # Melt the times and the courses matrix
-times_df = times_df[:-2] # Issue with x=no in xlsx
+times_df = times_df[:-2]  # Issue with x=no in xlsx
 times_df = times_df.reset_index()
-times_attr = times_df[['index','Times','Days']] # Create times attr
-times_df = times_df.drop(columns=['Times', 'Days']).melt(id_vars='index', var_name='Prof', value_name='Value')
-times_df = times_df.fillna(1).replace('x', 0) # x = no
+times_attr = times_df[['index', 'Times', 'Days']]  # Create times attr
+times_df = times_df.drop(columns=['Times', 'Days']).melt(
+    id_vars='index', var_name='Prof', value_name='Value'
+)
+times_df = times_df.fillna(1).replace('x', 0)  # x = no
 
-courses_df = courses_df[:-2] #issue with xlsx
-courses_attr = courses_df[['Number','Name','Grad/Ugrad','Credits','Labs/Discussion Sections','Total Enrollment']] # Create courses attr
-courses_df = courses_df.drop(columns=['Name','Grad/Ugrad','Credits','Labs/Discussion Sections','Total Enrollment']).melt(id_vars='Number', var_name='Prof', value_name='Value')
-courses_df = courses_df.fillna(0).replace('x', 1) # x = yes
+courses_df = courses_df[:-2]  # issue with xlsx
+courses_attr = courses_df[['Number', 'Name', 'Grad/Ugrad', 'Credits',
+                           'Labs/Discussion Sections', 'Total Enrollment']]  # Create courses attr
+courses_df = courses_df.drop(columns=['Name', 'Grad/Ugrad', 'Credits',
+                                      'Labs/Discussion Sections', 'Total Enrollment']).melt(
+    id_vars='Number', var_name='Prof', value_name='Value'
+)
+courses_df = courses_df.fillna(0).replace('x', 1)  # x = yes
 
 # Join in times, courses to the prof attr table
-prof_attr = prof_attr.merge(times_df, on='Prof', how='left').rename(columns={'index': 'time_idx', 'Value': 'time_bin'})
-prof_attr = prof_attr.merge(courses_df, on='Prof', how='left').rename(columns={'Number': 'course_idx', 'Value': 'course_bin'})
+prof_attr = prof_attr.merge(times_df, on='Prof', how='left').rename(
+    columns={'index': 'time_idx', 'Value': 'time_bin'}
+)
+prof_attr = prof_attr.merge(courses_df, on='Prof', how='left').rename(
+    columns={'Number': 'course_idx', 'Value': 'course_bin'}
+)
 prof_attr['course_idx'] = prof_attr['course_idx'].astype(int)
 prof_attr['course_bin'] = prof_attr['course_bin'].astype(str).str.strip().replace('', 0)
 prof_attr['course_bin'] = prof_attr['course_bin'].astype(int)
@@ -83,17 +93,18 @@ c_var = prof_attr.set_index(["Prof", "course_idx"])["course_bin"].to_dict()
 # d_{i,k} prof time elig
 d_var = prof_attr.set_index(["Prof", "time_idx"])["time_bin"].to_dict()
 
-# d_{i,k} prof time elig
+# e_j course has lab
 e_var = courses_attr.set_index("Number")["Labs"].to_dict()
 
 
 ### Set Model
 
 # Create the model
-m = gp.Model('course_sched') 
+m = gp.Model('course_sched')
 
 # Set parameters
 m.setParam('OutputFlag', True)
+m.setParam('NonConvex', 2)
 
 ### Decision Vars
 
@@ -106,31 +117,31 @@ idx_group = course_groups.keys()                          # Set of Course Groups
 day_time_groups = times_attr.groupby('Times_Grp_Day')['index'].apply(list).to_dict()
 idx_day_time = day_time_groups.keys()                     # Set of Day-Time Group IDs (t)
 prime_indices = times_attr.iloc[4:16]['index'].tolist()   # Find index of prime class scheduling times
-class_grp_701 = courses_attr[courses_attr['Number'] == 701]['Number_Group'].iloc[0] # Auto find 700 level classes
-tues_thurs_indices = times_attr[times_attr['Days'] == "T/TH"]['index'].tolist() # Find index of tuesday/thursday classes
+class_grp_701 = courses_attr[courses_attr['Number'] == 701]['Number_Group'].iloc[0]  # Auto find 700 level classes
+tues_thurs_indices = times_attr[times_attr['Days'] == "T/TH"]['index'].tolist()      # Find index of tuesday/thursday classes
 
 # x_{i,j} prof to class
 x_var = {
-(i, j): m.addVar(name=f"x_{i}_{j}", vtype=gp.GRB.BINARY)
-for i in idx_prof for j in idx_course
+    (i, j): m.addVar(name=f"x_{i}_{j}", vtype=gp.GRB.BINARY)
+    for i in idx_prof for j in idx_course
 }
 
 # y_{j,k} class to time
 y_var = {
-(j, k): m.addVar(name=f"y_{j}_{k}", vtype=gp.GRB.BINARY)
-for j in idx_course for k in idx_time
+    (j, k): m.addVar(name=f"y_{j}_{k}", vtype=gp.GRB.BINARY)
+    for j in idx_course for k in idx_time
 }
 
-# z_{i,k} prof to time
+# z_{i,k} prof to time 
 z_var = {
-(i, k): m.addVar(name=f"z_{i}_{k}", vtype=gp.GRB.BINARY)
-for i in idx_prof for k in idx_time
+    (i, k): m.addVar(name=f"z_{i}_{k}", vtype=gp.GRB.BINARY)
+    for i in idx_prof for k in idx_time
 }
 
-# l_{j,k} lab to time
+# l_{i,j,k} lab to time
 l_var = {
-(i, j, k): m.addVar(name=f"l_{i}_{j}_{k}", vtype=gp.GRB.BINARY)
-for i in idx_prof for j in idx_course for k in idx_time
+    (i, j, k): m.addVar(name=f"l_{i}_{j}_{k}", vtype=gp.GRB.BINARY)
+    for i in idx_prof for j in idx_course for k in idx_time
 }
 
 ### Modelling
@@ -138,113 +149,121 @@ for i in idx_prof for j in idx_course for k in idx_time
 # Update model to integrate new variables
 m.update()
 
-# Objective Func
+# Objective Func: maximize total scheduled credits
 m.setObjective(
     (gp.quicksum(x_var[i, j] * b_var[j] for i in idx_prof for j in idx_course)),
     gp.GRB.MAXIMIZE
 )
 
-# Constraint 1 ...
+# Constraint 1: each course assigned to exactly one prof
 m.addConstrs(
     (gp.quicksum(x_var[i, j] for i in idx_prof) == 1
      for j in idx_course),
-    name= f'one_prof'
+    name='one_prof'
 )
 
-# Constraint 2 ...
+# Constraint 2: prof max total credits
 m.addConstrs(
-    (gp.quicksum(x_var[i, j]*b_var[j] for j in idx_course) <= a_var[i]
+    (gp.quicksum(x_var[i, j] * b_var[j] for j in idx_course) <= a_var[i]
      for i in idx_prof),
-    name= f'prof_max'
+    name='prof_max'
 )
 
-# Constraint 3 ...
+# Constraint 3: prof–course eligibility
 m.addConstrs(
-    (x_var[i, j] <= c_var[i,j]
+    (x_var[i, j] <= c_var[i, j]
      for j in idx_course for i in idx_prof),
-    name= f'prop_course'
+    name='prop_course'
 )
 
-# Constraint 4 ...
+# Constraint 4: each course assigned exactly one time slot
 m.addConstrs(
     (gp.quicksum(y_var[j, k] for k in idx_time) == 1
      for j in idx_course),
-    name= f'one_class'
+    name='one_class'
 )
 
-# Constraint 5 ...
+# Constraint 5: limit number of time slots prof can teach (based on load)
 m.addConstrs(
-    (gp.quicksum(z_var[i, k] for k in idx_time) <= -(-a_var[i]//3)
+    (gp.quicksum(z_var[i, k] for k in idx_time) <= -(-a_var[i] // 3)
      for i in idx_prof),
-    name= f'limit_prof'
+    name='limit_prof'
 )
 
-# Constraint 6 ...
+# Constraint 6: prof–time eligibility
 m.addConstrs(
-    (z_var[i, k] <= d_var[i,k]
+    (z_var[i, k] <= d_var[i, k]
      for i in idx_prof for k in idx_time),
-    name= f'proper_prof_time'
+    name='proper_prof_time'
 )
 
-# Constraint 7 ...
+# Constraint 7: link prof–course–time (if prof i teaches course j at time k, then z_{i,k}=1)
 m.addConstrs(
     (x_var[i, j] + y_var[j, k] - 1 <= z_var[i, k]
      for i in idx_prof for j in idx_course for k in idx_time),
-    name= f'link_prof_class'
+    name='link_prof_class'
 )
 
-# Constraint 8 ...
+#  NEW Constraint 15: no double booking for prof at same time
+m.addConstrs(
+    (gp.quicksum(x_var[i, j] * y_var[j, k] for j in idx_course) <= z_var[i, k]
+     for i in idx_prof for k in idx_time),
+    name='no_double_booking'
+)
+
+# Constraint 8: consistency between x and y (each course taught & scheduled)
 m.addConstrs(
     (gp.quicksum(x_var[i, j] for i in idx_prof) == gp.quicksum(y_var[j, k] for k in idx_time)
      for j in idx_course),
-    name= f'one_to_one'
+    name='one_to_one'
 )
 
-# Constraint 9 ...
+# Constraint 9: labs exist only if course has lab
 m.addConstrs(
-    (gp.quicksum(l_var[i, j, k] for i in idx_prof for k in idx_time) == gp.quicksum(y_var[j, k]*e_var[j] for k in idx_time)
+    (gp.quicksum(l_var[i, j, k] for i in idx_prof for k in idx_time) ==
+     gp.quicksum(y_var[j, k] * e_var[j] for k in idx_time)
      for j in idx_course),
-    name= f'lab_exists'
+    name='lab_exists'
 )
 
-# Constraint 10 ...
+# Constraint 10: lab time/prof compatibility
 m.addConstrs(
-    (((1/3)*(x_var[i, j] + (1 - y_var[j, k]) + d_var[i, k])) >= l_var[i, j, k]
+    (((1 / 3) * (x_var[i, j] + (1 - y_var[j, k]) + d_var[i, k])) >= l_var[i, j, k]
      for i in idx_prof for j in idx_course for k in idx_time),
-    name= f'prof_lab_time'
+    name='prof_lab_time'
 )
 
-# Constraint 11 ...
+# Constraint 11: group/time conflict within course groups and day-time groups
 m.addConstrs(
-    (gp.quicksum(y_var[j, k] for j in course_groups[g] for k in day_time_groups[t]) 
+    (gp.quicksum(y_var[j, k] for j in course_groups[g] for k in day_time_groups[t])
      + gp.quicksum(l_var[i, j, k] for i in idx_prof for j in course_groups[g] for k in day_time_groups[t]) <= 1
      for g in idx_group for t in idx_day_time),
-    name= f'group_conflict'
+    name='group_conflict'
 )
 
-# Constraint 12 ...
+# Constraint 12: grad research (701) preferred times
 m.addConstr(
-    y_var[701, 8] + y_var[701,10] == 1,
-    name= f'grad_research_preffered'
+    y_var[701, 8] + y_var[701, 10] == 1,
+    name='grad_research_preffered'
 )
 
-# Constraint 13 ...
+# Constraint 13: at most 50% of group in prime times (excluding 701 group)
 m.addConstrs(
-    (gp.quicksum(y_var[j, k] for j in course_groups[g] for k in prime_indices if j != class_grp_701) * 2 <= 
+    (gp.quicksum(y_var[j, k] for j in course_groups[g] for k in prime_indices if j != class_grp_701) * 2 <=
      gp.quicksum(y_var[j, k] for j in course_groups[g] for k in idx_time if j != class_grp_701)
      for g in idx_group),
-    name= f'max_50_percent_prime'
+    name='max_50_percent_prime'
 )
 
-# Constraint 14 ...
+# Constraint 14: at most 50% of group on T/TH (excluding 701 group)
 m.addConstrs(
-    (gp.quicksum(y_var[j, k] for j in course_groups[g] for k in tues_thurs_indices if j != class_grp_701) * 2 <= 
+    (gp.quicksum(y_var[j, k] for j in course_groups[g] for k in tues_thurs_indices if j != class_grp_701) * 2 <=
      gp.quicksum(y_var[j, k] for j in course_groups[g] for k in idx_time if j != class_grp_701)
      for g in idx_group),
-    name= f'max_50_percent_T/Th'
+    name='max_50_percent_T/Th'
 )
 
-# Update model to integrate new variables
+# Update model to integrate new constraints
 m.update()
 
 # Optimize the model
@@ -252,11 +271,11 @@ m.optimize()
 
 # Print the result
 status_codes = {
-1: 'LOADED',
-2: 'OPTIMAL',
-3: 'INFEASIBLE',
-4: 'INF_OR_UNBD',
-5: 'UNBOUNDED'
+    1: 'LOADED',
+    2: 'OPTIMAL',
+    3: 'INFEASIBLE',
+    4: 'INF_OR_UNBD',
+    5: 'UNBOUNDED'
 }
 status = m.status
 
