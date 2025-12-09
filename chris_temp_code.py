@@ -60,8 +60,8 @@ times_attr['Times_Grp_Day'] = (times_attr.index // 4) * 2 + (times_attr.index % 
 courses_attr.loc[courses_attr['Grad/Ugrad'] == 'Ugrad', 'Credits'] *= 3
 courses_attr['Number'] = courses_attr['Number'].astype(int)
 courses_attr['Number_Group'] = np.where(
-    courses_attr['Number'].isin([521, 523, 532, 581]),
-    8,
+    (courses_attr['Number'] >= 500) & (courses_attr['Number'] <= 699),
+    6,
     ((courses_attr['Number'] - 1) // 100)
 )
 courses_attr['Labs'] = (courses_attr['Labs/Discussion Sections'] > 0).astype(int)
