@@ -219,6 +219,11 @@ m.addConstrs(
     name= f'group_conflict'
 )
 
+# Constraint 701 Class ...
+m.addConstr(
+    y_var[701, 8] + y_var[701,10] == 1,
+    name= f'grad_research_preffered'
+)
 
 
 # Update model to integrate new variables
@@ -237,8 +242,9 @@ status_codes = {
 }
 status = m.status
 
-
+#################################
 ### Section 4: Output Results ###
+#################################
 
 print_results(m, x_var, y_var, l_var, courses_attr, times_attr)
 
