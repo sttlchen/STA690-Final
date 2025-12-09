@@ -105,6 +105,8 @@ course_groups = courses_attr.groupby('Number_Group')['Number'].apply(list).to_di
 idx_group = course_groups.keys()                          # Set of Course Groups (g)
 day_time_groups = times_attr.groupby('Times_Grp_Day')['index'].apply(list).to_dict()
 idx_day_time = day_time_groups.keys()                     # Set of Day-Time Group IDs (t)
+prime_indices = times_attr.iloc[4:16]['index'].tolist()   # Find index of prime class scheduling times
+class_grp_701 = courses_attr[courses_attr['Number'] == 701]['Number_Group'].iloc[0] # Auto find 700 level classes
 
 # x_{i,j} prof to class
 x_var = {
@@ -219,12 +221,19 @@ m.addConstrs(
     name= f'group_conflict'
 )
 
-# Constraint 701 Class ...
+# Constraint 12 ...
 m.addConstr(
     y_var[701, 8] + y_var[701,10] == 1,
     name= f'grad_research_preffered'
 )
 
+# Constraint 13 ...
+m.addConstrs(
+    (gp.quicksum(y_var[j, k] for j in course_groups[g] for k in prime_indices if j != class_grp_701) * 2 <= 
+     gp.quicksum(y_var[j, k] for j in course_groups[g] for k in idx_time if j != class_grp_701)
+     for g in idx_group),
+    name= f'max_50_percent_prime'
+)
 
 # Update model to integrate new variables
 m.update()
