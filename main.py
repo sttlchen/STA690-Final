@@ -94,6 +94,7 @@ m = gp.Model('course_sched')
 
 # Set parameters
 m.setParam('OutputFlag', True)
+m.setParam("Seed", 123)
 
 ### Decision Vars
 
@@ -181,40 +182,48 @@ m.addConstrs(
 
 # Constraint 6 ...
 m.addConstrs(
+    (gp.quicksum(z_var[i, k] for k in day_time_groups[t]) + 
+    gp.quicksum(l_var[i, j, k] for k in day_time_groups[t] for j in idx_course)  <= 1
+     for i in idx_prof for t in idx_day_time),
+    name= f'double_booking_within_grp'
+)
+
+# Constraint 7 ...
+m.addConstrs(
     (z_var[i, k] <= d_var[i,k]
      for i in idx_prof for k in idx_time),
     name= f'proper_prof_time'
 )
 
-# Constraint 7 ...
+# Constraint 8 ...
 m.addConstrs(
     (x_var[i, j] + y_var[j, k] - 1 <= z_var[i, k]
      for i in idx_prof for j in idx_course for k in idx_time),
     name= f'link_prof_class'
 )
 
-# Constraint 8 ...
+# Constraint 9 ...
 m.addConstrs(
-    (gp.quicksum(x_var[i, j] for i in idx_prof) == gp.quicksum(y_var[j, k] for k in idx_time)
-     for j in idx_course),
-    name= f'one_to_one'
+    (gp.quicksum(x_var[i, j] * y_var[j, k] for j in idx_course) <= 1
+     for i in idx_prof for k in idx_time),
+    name='no_double_booking'
 )
 
-# Constraint 9 ...
+# Constraint 10 ...
 m.addConstrs(
     (gp.quicksum(l_var[i, j, k] for i in idx_prof for k in idx_time) == gp.quicksum(y_var[j, k]*e_var[j] for k in idx_time)
      for j in idx_course),
     name= f'lab_exists'
 )
 
-# Constraint 10 ...
+# Constraint 11 ...
 m.addConstrs(
     (((1/3)*(x_var[i, j] + (1 - y_var[j, k]) + d_var[i, k])) >= l_var[i, j, k]
      for i in idx_prof for j in idx_course for k in idx_time),
     name= f'prof_lab_time'
 )
 
-# Constraint 11 ...
+# Constraint 12 ...
 m.addConstrs(
     (gp.quicksum(y_var[j, k] for j in course_groups[g] for k in day_time_groups[t]) 
      + gp.quicksum(l_var[i, j, k] for i in idx_prof for j in course_groups[g] for k in day_time_groups[t]) <= 1
@@ -222,13 +231,13 @@ m.addConstrs(
     name= f'group_conflict'
 )
 
-# Constraint 12 ...
+# Constraint 13 ...
 m.addConstr(
     y_var[701, 8] + y_var[701,10] == 1,
     name= f'grad_research_preffered'
 )
 
-# Constraint 13 ...
+# Constraint 14 ...
 m.addConstrs(
     (gp.quicksum(y_var[j, k] for j in course_groups[g] for k in prime_indices if j != class_grp_701) * 2 <= 
      gp.quicksum(y_var[j, k] for j in course_groups[g] for k in idx_time if j != class_grp_701)
@@ -236,7 +245,7 @@ m.addConstrs(
     name= f'max_50_percent_prime'
 )
 
-# Constraint 14 ...
+# Constraint 15 ...
 m.addConstrs(
     (gp.quicksum(y_var[j, k] for j in course_groups[g] for k in tues_thurs_indices if j != class_grp_701) * 2 <= 
      gp.quicksum(y_var[j, k] for j in course_groups[g] for k in idx_time if j != class_grp_701)
